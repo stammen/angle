@@ -215,19 +215,27 @@ HRESULT GetCoreWindowSizeInPixels(const ComPtr<ABI::Windows::UI::Core::ICoreWind
 
 static float GetLogicalDpi()
 {
-    ComPtr<ABI::Windows::Graphics::Display::IDisplayPropertiesStatics> displayProperties;
+    float dpi = 96.0;
+    Microsoft::WRL::ComPtr<ABI::Windows::Graphics::Display::IDisplayInformationStatics> displayInformationFactory;
+    HRESULT hr = RoGetActivationFactory(Microsoft::WRL::Wrappers::HString::MakeReference(RuntimeClass_Windows_Graphics_Display_DisplayInformation).Get(),
+        IID_PPV_ARGS(&displayInformationFactory));
 
-    if (SUCCEEDED(GetActivationFactory(HStringReference(RuntimeClass_Windows_Graphics_Display_DisplayProperties).Get(), displayProperties.GetAddressOf())))
+    if (SUCCEEDED(hr))
     {
-        float dpi = 96.0f;
-        if (SUCCEEDED(displayProperties->get_LogicalDpi(&dpi)))
+        Microsoft::WRL::ComPtr<ABI::Windows::Graphics::Display::IDisplayInformation> displayInformation;
+        hr = displayInformationFactory->GetForCurrentView(&displayInformation);
+        if (SUCCEEDED(hr))
         {
-            return dpi;
+            float dpi;
+            hr = displayInformation->get_LogicalDpi(&dpi);
+            if (FAILED(hr))
+            {
+                dpi = 96.0f;
+            }
         }
     }
 
-    // Return 96 dpi as a default if display properties cannot be obtained.
-    return 96.0f;
+    return dpi;
 }
 
 long ConvertDipsToPixels(float dips)
