@@ -39,14 +39,30 @@
 
 using namespace ABI::Windows::Foundation::Collections;
 
+//HACK - mlf
+static ComPtr<ABI::Windows::Perception::IPerceptionTimestamp> mostRecentPredictionTimestamp;
+__declspec(dllexport) ComPtr<ABI::Windows::Perception::IPerceptionTimestamp> AngleHolographicGetCurrentPredictionTimestamp()
+{
+  return mostRecentPredictionTimestamp;
+}
+
 namespace rx
 {
+
+//"global" camera tracking state - mlf
+static std::vector<ComPtr<ABI::Windows::Graphics::Holographic::IHolographicCamera>> gHolographicCameras;
 
 bool HolographicNativeWindow::mInitialized = false;
 
 HolographicNativeWindow::~HolographicNativeWindow()
 {
     unregisterForHolographicCameraEvents();
+
+    gHolographicCameras.clear();
+    for(auto &swapChain : mHolographicCameras)
+    {
+      gHolographicCameras.push_back(swapChain.second->GetHolographicCamera());
+    }
 }
 
 bool HolographicNativeWindow::initialize(EGLNativeWindowType holographicSpace, IPropertySet *propertySet)
@@ -144,7 +160,7 @@ bool HolographicNativeWindow::initialize(EGLNativeWindowType holographicSpace, I
         ComPtr<IInspectable> enableAutomaticDepthBasedImageStabilizationPropertyInspectable;
         if (SUCCEEDED(result) && hasEglAutomaticDepthBasedImageStabilizationProperty)
         {
-            result = spPropertyMap->Lookup(HStringReference(EGLAutomaticDepthBasedImageStabilizationProperty).Get(), &enableAutomaticDepthBasedImageStabilizationPropertyInspectable);
+            result = spPropertyMap->Lookup(HStringReference(EGLAutomaticStereoRenderingProperty).Get(), &enableAutomaticDepthBasedImageStabilizationPropertyInspectable);
         }
 
         ComPtr<IPropertyValue> enableAutomaticDepthBasedImageStabilizationProperty;
@@ -484,6 +500,24 @@ HRESULT HolographicNativeWindow::getPreferredDeviceFeatureSupport()
     return hr;
 }
 
+void HolographicNativeWindow::setRenderer11(Renderer11 *renderer)
+{
+  mRenderer = renderer;
+
+  // In the case of full context loss, we may be spun up with a holographic space that already has existing cameras
+  // adding those here - mlf
+  {
+    std::lock_guard<std::mutex> locker(mHolographicCamerasLock);
+    for(auto holographicCamera : gHolographicCameras)
+    {
+      UINT32 id;
+      (void)holographicCamera->get_Id(&id);
+      HANDLE shareHandle = (void*)0;
+      mHolographicCameras[id] = std::make_unique<HolographicSwapChain11>(mRenderer, this, shareHandle, holographicCamera.Get());
+    }
+  }
+}
+
 // Initializes the HolographicSpace.
 HRESULT HolographicNativeWindow::setD3DDevice(ID3D11Device *device)
 {
@@ -648,6 +682,37 @@ HRESULT HolographicNativeWindow::UpdateHolographicResources()
     if (SUCCEEDED(hr))
     {
         hr = prediction->get_CameraPoses(mHolographicCameraPoses.ReleaseAndGetAddressOf());
+
+        // Maintain a mapping from holographic camera id to camera pose
+        if (SUCCEEDED(hr))
+        {
+          unsigned int size = 0;
+          HRESULT hr = mHolographicCameraPoses->get_Size(&size);
+
+          for (int i = 0; i < size; i++)
+          {
+            ComPtr<ABI::Windows::Graphics::Holographic::IHolographicCameraPose> cameraPose;
+            hr = mHolographicCameraPoses->GetAt(i, cameraPose.GetAddressOf());
+
+            if (SUCCEEDED(hr))
+            {
+              ComPtr<ABI::Windows::Graphics::Holographic::IHolographicCamera> cam;
+
+              hr = cameraPose->get_HolographicCamera(cam.ReleaseAndGetAddressOf());
+
+              if (SUCCEEDED(hr)) 
+              {
+                UINT32 camId;
+                hr = cam->get_Id(&camId);
+
+                if (SUCCEEDED(hr))
+                {
+                  mHolographicCameraIdToPoseMap[camId] = i;
+                }
+              }
+            }
+          }
+        }
     }
 
     // Get the coordinate system.
@@ -656,11 +721,17 @@ HRESULT HolographicNativeWindow::UpdateHolographicResources()
         if (mStationaryReferenceFrame != nullptr)
         {
             hr = mStationaryReferenceFrame->get_CoordinateSystem(mCoordinateSystem.GetAddressOf());
+
+            ComPtr<ABI::Windows::Perception::IPerceptionTimestamp> timestamp;
+            hr = prediction->get_Timestamp(timestamp.GetAddressOf());
+            if (SUCCEEDED(hr))
+              mostRecentPredictionTimestamp = timestamp;
         }
         else if (mAttachedReferenceFrame != nullptr)
         {
             ComPtr<ABI::Windows::Perception::IPerceptionTimestamp> timestamp;
             hr = prediction->get_Timestamp(timestamp.GetAddressOf());
+            mostRecentPredictionTimestamp = timestamp;
             if (SUCCEEDED(hr))
             {
                 hr = mAttachedReferenceFrame->GetStationaryCoordinateSystemAtTimestamp(timestamp.Get(), mCoordinateSystem.GetAddressOf());
@@ -687,6 +758,15 @@ HRESULT HolographicNativeWindow::GetHolographicRenderingParameters(UINT32 id, AB
 
     unsigned int size = 0;
     HRESULT hr = mHolographicCameraPoses->get_Size(&size);
+
+    auto iter = mHolographicCameraIdToPoseMap.find(id);
+    if (iter == mHolographicCameraIdToPoseMap.end())
+    {
+        return E_BOUNDS;
+    }
+
+    id = iter->second;
+
     if (FAILED(hr))
     {
         return E_UNEXPECTED;
@@ -721,6 +801,15 @@ HRESULT HolographicNativeWindow::GetHolographicCameraPose(UINT32 id, ABI::Window
 
     unsigned int size = 0;
     HRESULT hr = mHolographicCameraPoses->get_Size(&size);
+
+    auto iter = mHolographicCameraIdToPoseMap.find(id);
+    if(iter == mHolographicCameraIdToPoseMap.end())
+    {
+      return E_BOUNDS;
+    }
+
+    id = iter->second;
+
     if (FAILED(hr))
     {
         return E_UNEXPECTED;

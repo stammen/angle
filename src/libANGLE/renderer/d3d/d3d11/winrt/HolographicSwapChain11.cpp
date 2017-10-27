@@ -13,6 +13,8 @@
 #include "libANGLE/renderer/d3d/d3d11/winrt/HolographicSwapChain11.h"
 
 #include <windows.graphics.directx.direct3d11.interop.h>
+#include <windows.perception.spatial.h>
+#include <windows.foundation.numerics.h>
 
 #include <directxmath.h>
 #include <windowsnumerics.h>
@@ -47,6 +49,64 @@ using namespace ABI::Windows::Graphics::Holographic;
 using namespace ABI::Windows::Perception::Spatial;
 using namespace DirectX;
 
+///HACK - mlf
+namespace gl
+{
+  static DirectX::XMFLOAT4X4 gHoloViewProj[2];
+  static DirectX::XMFLOAT4X4 gHoloMView[2];
+  static DirectX::XMFLOAT4X4 gHoloProj[2];
+
+  void AngleHolographicGetHoloMatrices(float *matrices, int type)
+  {
+    if(type == 0)
+      memcpy(matrices, gHoloViewProj, sizeof(float) * 16 * 2);
+    else if(type == 1)
+      memcpy(matrices, gHoloMView, sizeof(float) * 16 * 2);
+    else if(type == 2)
+      memcpy(matrices, gHoloProj, sizeof(float) * 16 * 2);
+  }
+}
+
+static ABI::Windows::Foundation::Numerics::Vector3 gHoloFocusPos, gHoloFocusNorm, gHoloFocusVeloc;
+static bool gHoloFocusPosEnabled = false, gHoloFocusNormEnabled = false, gHoloFocusVelocEnabled = false;
+
+__declspec(dllexport) void AngleHolographicSetCurrentFocusPointParameters(const float pos[3], const float normal[3], const float velocity[3])
+{
+  gHoloFocusPosEnabled = gHoloFocusNormEnabled = gHoloFocusVelocEnabled = false;
+
+  if(pos)
+  {
+    gHoloFocusPos = { pos[0], pos[1], pos[2] };
+    gHoloFocusPosEnabled = true;
+  }
+  if(normal)
+  {
+    gHoloFocusNorm = { normal[0], normal[1], normal[2] };
+    gHoloFocusNormEnabled = true;
+  }
+  if(velocity)
+  {
+    gHoloFocusVeloc = { velocity[0], velocity[1], velocity[2] };
+    gHoloFocusVelocEnabled = true;
+  }
+}
+
+static ComPtr<ABI::Windows::Foundation::IReference<ABI::Windows::Perception::Spatial::SpatialBoundingFrustum>> gBoundingFrustum;
+__declspec(dllexport) decltype(gBoundingFrustum) AngleHolographicGetCurrentBoundingFrustum()
+{
+  return gBoundingFrustum;
+}
+
+//this one seems REALLLLLY unnecessary, but egl surface queries are giving me -1 and I don't want to risk more regressions - mlf
+static int gHoloSwapChainDimsX = -1, gHoloSwapChainDimsY = -1;
+static float gHoloSwapChainScaleFactor = -1;
+__declspec(dllexport) void AngleHolographicGetCurrentSwapChainDimensions(int *w, int *h, float *scaleFactor)
+{
+  *w = gHoloSwapChainDimsX;
+  *h = gHoloSwapChainDimsY;
+  *scaleFactor = gHoloSwapChainScaleFactor;
+}
+
 namespace rx
 {
 
@@ -64,7 +124,7 @@ bool NeedsOffscreenTexture(Renderer11 *renderer, NativeWindow nativeWindow, EGLi
 
 DirectX::XMFLOAT4X4 HolographicSwapChain11::mMidViewMatrix;
 DirectX::XMFLOAT4X4 HolographicSwapChain11::mMidViewMatrixInverse;
-bool HolographicSwapChain11::mUseAutomaticStereoRendering              = true;
+bool HolographicSwapChain11::mUseAutomaticStereoRendering              = false;
 bool HolographicSwapChain11::mUseAutomaticDepthBasedImageStabilization = false;
 bool HolographicSwapChain11::mWaitForVBlank = true;
 
@@ -73,7 +133,7 @@ HolographicSwapChain11::HolographicSwapChain11(Renderer11 *renderer,
                          HolographicNativeWindow* nativeWindow,
                          HANDLE shareHandle,
                          ABI::Windows::Graphics::Holographic::IHolographicCamera* pCamera)
-    : SwapChainD3D(*((NativeWindow*)nativeWindow), shareHandle, GL_RGBA, GL_DEPTH_COMPONENT16),
+    : SwapChainD3D(*((NativeWindow*)nativeWindow), shareHandle, GL_RGBA, GL_DEPTH_COMPONENT24),
       mHolographicNativeWindow(nativeWindow),
       mRenderer(renderer),
       mHolographicCamera(pCamera),
@@ -95,6 +155,11 @@ HolographicSwapChain11::HolographicSwapChain11(Renderer11 *renderer,
     mHolographicCamera->get_RenderTargetSize(&mRenderTargetSize);
     mHolographicCamera->get_ViewportScaleFactor(&mViewportScaleFactor);
     mHolographicCamera->get_IsStereo(&mIsStereo);
+
+    //make note of dimensions - mlf
+    gHoloSwapChainDimsX = mRenderTargetSize.Width;
+    gHoloSwapChainDimsY = mRenderTargetSize.Height;
+    gHoloSwapChainScaleFactor = (float)mViewportScaleFactor;
 
     // cache the ID
     mHolographicCamera->get_Id(&mHolographicCameraId);
@@ -530,16 +595,18 @@ EGLint HolographicSwapChain11::updateHolographicRenderingParameters(
         }
     }
 
-    // Update holographic view/projection matrices.
+    //static ComPtr<ABI::Windows::Perception::Spatial::ISpatialCoordinateSystem> coordinateSystem = mHolographicNativeWindow->GetCoordinateSystem();
+    ComPtr<ABI::Windows::Perception::Spatial::ISpatialCoordinateSystem> spCoordinateSystem = mHolographicNativeWindow->GetCoordinateSystem();
     if (SUCCEEDED(result))
     {
-        ComPtr<ABI::Windows::Perception::Spatial::ISpatialCoordinateSystem> spCoordinateSystem = 
-            mHolographicNativeWindow->GetCoordinateSystem();
-
-        if (spCoordinateSystem != nullptr)
+        if(spCoordinateSystem != nullptr)
         {
             ComPtr<ABI::Windows::Graphics::Holographic::IHolographicCameraPose> spPose;
-            result = mHolographicNativeWindow->GetHolographicCameraPoses()->GetAt(mHolographicCameraId, spPose.GetAddressOf());
+            result = mHolographicNativeWindow->GetHolographicCameraPose(mHolographicCameraId, spPose.GetAddressOf());
+
+            //TODO: make this optional if users don't need this (it would waste valuable frame computaton time)
+            if (!SUCCEEDED(spPose->TryGetCullingFrustum(spCoordinateSystem.Get(), gBoundingFrustum.ReleaseAndGetAddressOf())))
+              gBoundingFrustum.Reset();
 
             ABI::Windows::Graphics::Holographic::HolographicStereoTransform viewTransform;
             if (SUCCEEDED(result))
@@ -558,6 +625,14 @@ EGLint HolographicSwapChain11::updateHolographicRenderingParameters(
             {
                 result = spPose->get_ProjectionTransform(&projectionTransform);
             }
+
+
+            static DirectX::XMFLOAT4X4 viewProj[2];
+            static DirectX::XMFLOAT4X4 view[2];
+            static DirectX::XMFLOAT4X4 proj[2];
+
+            gl::Program *program = nullptr;
+            gl::Context *context = nullptr;
 
             if (SUCCEEDED(result))
             {
@@ -581,7 +656,7 @@ EGLint HolographicSwapChain11::updateHolographicRenderingParameters(
                 const auto rightViewMatrix = DirectX::XMLoadFloat4x4(reinterpret_cast<DirectX::XMFLOAT4X4*>(&viewTransform.Right));
                 
                 // interpolate view matrix
-                if (mHolographicCameraId == 0)
+                if (mHolographicCameraId == 0 && mUseAutomaticStereoRendering)
                 {
                     ComputeMidViewMatrix(leftViewMatrix, rightViewMatrix);
                 }
@@ -634,6 +709,15 @@ EGLint HolographicSwapChain11::updateHolographicRenderingParameters(
                     &mProjection,
                     DirectX::XMLoadFloat4x4(reinterpret_cast<DirectX::XMFLOAT4X4*>(&projectionTransform.Left))
                 );
+
+                DirectX::XMStoreFloat4x4(gl::gHoloMView, DirectX::XMLoadFloat4x4(reinterpret_cast<DirectX::XMFLOAT4X4*>(&viewTransform.Left)));
+                DirectX::XMStoreFloat4x4((DirectX::XMFLOAT4X4 *)(((float *)gl::gHoloMView)+16), DirectX::XMLoadFloat4x4(reinterpret_cast<DirectX::XMFLOAT4X4*>(&viewTransform.Right)));
+                DirectX::XMStoreFloat4x4(gl::gHoloProj, DirectX::XMLoadFloat4x4(reinterpret_cast<DirectX::XMFLOAT4X4*>(&projectionTransform.Left)));
+                DirectX::XMStoreFloat4x4((DirectX::XMFLOAT4X4 *)(((float *)gl::gHoloProj)+16), DirectX::XMLoadFloat4x4(reinterpret_cast<DirectX::XMFLOAT4X4*>(&projectionTransform.Right)));
+
+                memcpy(gl::gHoloViewProj, viewProj, sizeof(float) * 16 * 2);
+                //memcpy(gl::gHoloMView, view, sizeof(float) * 16 * 2);
+                //memcpy(gl::gHoloProj, proj, sizeof(float) * 16 * 2);
 
                 // get the current program
                 gl::Context *glContext = gl::GetValidGlobalContext();
@@ -723,6 +807,25 @@ EGLint HolographicSwapChain11::updateHolographicRenderingParameters(
                 }
             }
         }
+    }
+
+    if (SUCCEEDED(result))
+    {
+      if(gHoloFocusPosEnabled && spCoordinateSystem)
+      {
+        if(gHoloFocusVelocEnabled && gHoloFocusNormEnabled)
+        {
+          spCameraRenderingParameters->SetFocusPointWithNormalLinearVelocity(spCoordinateSystem.Get(), gHoloFocusPos, gHoloFocusNorm, gHoloFocusVeloc);
+        }
+        else if(gHoloFocusNormEnabled)
+        {
+          spCameraRenderingParameters->SetFocusPointWithNormal(spCoordinateSystem.Get(), gHoloFocusPos, gHoloFocusNorm);
+        }
+        else
+        {
+          spCameraRenderingParameters->SetFocusPoint(spCoordinateSystem.Get(), gHoloFocusPos);
+        }
+      }
     }
 
     if (FAILED(result))
