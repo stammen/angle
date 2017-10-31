@@ -226,7 +226,6 @@ static float GetLogicalDpi()
         hr = displayInformationFactory->GetForCurrentView(&displayInformation);
         if (SUCCEEDED(hr))
         {
-            float dpi;
             hr = displayInformation->get_LogicalDpi(&dpi);
             if (FAILED(hr))
             {
