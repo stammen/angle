@@ -524,9 +524,14 @@ EGLint HolographicSwapChain11::updateHolographicRenderingParameters(
             }
 
             // A new depth stencil view is also needed.
-            return resetOffscreenBuffers(
+            EGLint result = resetOffscreenBuffers(
                 static_cast<EGLint>(mRenderTargetSize.Width),
                 static_cast<EGLint>(mRenderTargetSize.Height));
+
+            if (result != EGL_SUCCESS)
+            {
+                return result;
+            }
         }
     }
 
@@ -951,13 +956,13 @@ EGLint HolographicSwapChain11::present(IHolographicFrame* pFrame)
         // should be removed.
         if (mBackBufferRTView != nullptr)
         {
-            spContext->DiscardView(mBackBufferRTView.Get());
+            //spContext->DiscardView(mBackBufferRTView.Get());
         }
 
         // Discard the contents of the depth stencil.
         if (mDepthStencilDSView != nullptr)
         {
-            spContext->DiscardView(mDepthStencilDSView);
+            //spContext->DiscardView(mDepthStencilDSView);
         }
     }
 
