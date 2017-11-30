@@ -89,7 +89,7 @@ To obtain information about Windows 10 development, go to the [Windows Dev Cente
 (http://go.microsoft.com/fwlink/?LinkID=532421).
 
 To obtain information about the tools used for Windows Holographic development, including
-Microsoft Visual Studio 2015 Update 2 and the Microsoft HoloLens Emulator, go to
+Microsoft Visual Studio 2017 and the Microsoft HoloLens Emulator, go to
 [Install the tools](https://developer.microsoft.com/windows/holographic/install_the_tools).
 
 ## System requirements
@@ -98,30 +98,40 @@ Microsoft Visual Studio 2015 Update 2 and the Microsoft HoloLens Emulator, go to
 
 ## Build ANGLE with Windows Holographic experimental support included
 
-1. Clone the repo: ```git clone [https://github.com/Microsoft/angle.git](https://github.com/Microsoft/angle.git) angle```
-2. Checkout the experimental branch:
+1. Clone the repo: ```git clone [https://github.com/stammen/angle.git](https://github.com/Microsoft/angle.git) angle```
+2. Checkout the mr branch:
 
 ```
     cd angle
-    git checkout ms-holographic-experimental
+    git checkout mr
 ```
 
-3. Start Microsoft Visual Studio 2015 Update 2 and select **File** \> **Open** \> **Project/Solution**.
+3. Start Microsoft Visual Studio 2017 and select **File** \> **Open** \> **Project/Solution**.
 4. Starting in the folder where you cloned the branch, go to winrt\10\src\ and open angle.sln.
-5. Set your target platform to Win32, and set Debug or Release as desired.
+5. Set your target platform to Win32 or x64, and set Debug or Release as desired.
 6. Right-click on the libAngle project and select **Build**.
 
 ## Build the ANGLE UWP app template with Windows Holographic experimental support included
 
+**Note: You will need to manually copy the Holographic templates to Visual Studio 2017 
+Copy the templates\10\Windows folder to Documents\Visual Studio 2017\Templates\ProjectTemplates\ 
+
 1. Open an Explorer window and go to the folder where you cloned the experimental branch.
-2. Navigate to templates\ and run install.bat.
-3. Start Microsoft Visual Studio 2015 Update 2 and select **File** \> **New ** \> **Project**.
-4. Under **Templates** \> **Visual C\+\+** \> **Windows** \> **Universal**, select 
+
+1. Navigate to templates\ and run install.bat.
+
+1. Start Microsoft Visual Studio 2017 and select **File** \> **New ** \> **Project**.
+
+1. Under **Templates** \> **Visual C\+\+** \> **Windows** \> **Universal**, select 
    **App for OpenGL ES (Windows Universal)** or **Holographic App for OpenGL ES (Windows 
    Universal)**.
-5. Name your app, select a folder, and click **OK**.
-6. Set your target platform to x86, and set Debug or Release as desired.
-7. Right-click on your app project and select **Build**.
+   
+1. Name your app, select a folder, and click **OK**.
+
+1. Set your target platform to x86 or x64, and set Debug or Release as desired. You will need to update the project settings. Right click on the Holographic project and select Retarget Projects. Set SDK Version and SDK Min. Version to 10.0.16299.0 
+Set Platform Toolset to v141 
+
+1. Right-click on your app project and select **Build**.
 
 **Note:** You may now begin development, or proceed to build and run the sample content.
 
