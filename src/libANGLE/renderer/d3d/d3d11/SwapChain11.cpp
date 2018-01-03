@@ -197,6 +197,21 @@ EGLint SwapChain11::resetOffscreenColorBuffer(int backbufferWidth, int backbuffe
             ID3D11Resource *tempResource11;
             HRESULT result = device->OpenSharedResource(mShareHandle, __uuidof(ID3D11Resource),
                                                         (void **)&tempResource11);
+
+            if (FAILED(result))
+            {
+                // Windows Holographic creates a shared texture with D3D11_RESOURCE_MISC_SHARED_NTHANDLE
+                ID3D11Device1 *device1;
+                result = device->QueryInterface(__uuidof (ID3D11Device1), (void **)&device1);
+                if (SUCCEEDED(result))
+                {
+                    result = device1->OpenSharedResource1(mShareHandle, __uuidof(ID3D11Resource),
+                        (void**)&tempResource11);
+
+                    device1->Release();
+                }
+            }
+
             ASSERT(SUCCEEDED(result));
 
             mOffscreenTexture = d3d11::DynamicCastComObject<ID3D11Texture2D>(tempResource11);

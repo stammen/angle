@@ -1239,6 +1239,21 @@ egl::Error Renderer11::validateShareHandle(const egl::Config *config,
     ID3D11Resource *tempResource11 = nullptr;
     HRESULT result = mDevice->OpenSharedResource(shareHandle, __uuidof(ID3D11Resource),
                                                  (void **)&tempResource11);
+
+    if (FAILED(result))
+    {
+        // Windows Holographic creates a shared texture with D3D11_RESOURCE_MISC_SHARED_NTHANDLE
+        ID3D11Device1 *device1;
+        result = mDevice->QueryInterface(__uuidof (ID3D11Device1), (void **)&device1);
+        if (SUCCEEDED(result))
+        {
+            result = device1->OpenSharedResource1(shareHandle, __uuidof(ID3D11Resource),
+                                          (void**)&tempResource11);
+
+            device1->Release();
+        }
+    }
+
     if (FAILED(result))
     {
         return egl::Error(EGL_BAD_PARAMETER, "Failed to open share handle, result: 0x%X.", result);
