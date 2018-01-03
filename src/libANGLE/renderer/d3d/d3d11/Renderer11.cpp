@@ -1280,7 +1280,8 @@ egl::Error Renderer11::validateShareHandle(const egl::Config *config,
         d3d11::Format::Get(config->renderTargetFormat, getRenderer11DeviceCaps());
 
     if (desc.Width != static_cast<UINT>(width) || desc.Height != static_cast<UINT>(height) ||
-        desc.Format != backbufferFormatInfo.texFormat || desc.MipLevels != 1 || desc.ArraySize != 1)
+        desc.Format != backbufferFormatInfo.texFormat || desc.MipLevels != 1)
+        //desc.Format != backbufferFormatInfo.texFormat || desc.MipLevels != 1 || desc.ArraySize != 1)
     {
         return egl::Error(EGL_BAD_PARAMETER, "Invalid texture parameters in share handle texture.");
     }
