@@ -6,6 +6,7 @@ Release/
 Release_Win32/
 Release_x64/
 Release_ARM/
+.vs/
 *.sdf
 *.ncb
 *.suo
